@@ -1,20 +1,59 @@
-<meta charset="UTF-8">
-<button id="readTimocom">Взять выбранный груз TIMOCOM</button>
-<textarea id="timocomText" rows="7" placeholder="Текст груза из TIMOCOM"></textarea>
-chrome.runtime.onInstalled.addListener(() => {
-  if (chrome.sidePanel) {
-    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  }
-});
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Truck Route Calculator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 10px;
+      width: 420px;
+    }
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.type === "TIMOCOM_OFFER_CAPTURED") {
-    chrome.storage.local.set({
-      timocomSelectedOffer: msg.payload,
-      timocomSelectedOfferText: msg.payload?.fullText || ""
-    });
+    button {
+      margin-bottom: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
 
-    sendResponse({ ok: true });
-    return true;
-  }
-});
+    textarea,
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom: 8px;
+    }
+
+    textarea {
+      min-height: 160px;
+    }
+  </style>
+</head>
+<body>
+  <h3>Truck Route Calculator</h3>
+
+  <button id="takeTimocomOfferBtn">
+    Взять выбранный груз TIMOCOM
+  </button>
+
+  <textarea
+    id="timocomDebugText"
+    placeholder="Текст груза из TIMOCOM"
+  ></textarea>
+
+  <label>Truck location</label>
+  <input id="truck_location" placeholder="truck_location" />
+
+  <label>Loading</label>
+  <input id="loading" placeholder="loading" />
+
+  <label>Unloading</label>
+  <input id="unloading" placeholder="unloading" />
+
+  <label>Price</label>
+  <input id="price" placeholder="price" />
+
+  <div id="result"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
