@@ -1,129 +1,143 @@
-function cleanPlace(value) {
-  return decodeURIComponent(value)
-    .replace(/\+/g, " ")
-    .replace(/%2C/g, ",")
+document.getElementById("readTimocom").addEventListener("click", async () => {
+  const data = await chrome.storage.local.get("lastTimocomText");
+  const text = data.lastTimocomText || "";
+
+  document.getElementById("timocomText").value = text;
+
+  document.getElementById("result").innerText = text
+    ? "Груз из TIMOCOM загружен в панель."
+    : "Сначала нажми 🚚 Analyze на карточке TIMOCOM.";
+    function normalizeTimocomText(text) {
+  return (text || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
-function formatCountryDetails(details) {
-  let text = "";
 
-  for (const [country, data] of Object.entries(details)) {
-    text += `${country}: ${data.km} км | ⛽ ${data.fuel}€ | 🛣 ${data.toll}€ | Σ ${data.total}€\n`;
-  }
+function parseTimocomOffer(input) {
+  const text = normalizeTimocomText(
+    typeof input === "string" ? input : input?.fullText || ""
+  );
 
-  return text.trim();
-}
-function parseGoogleMapsUrl(url) {
-  const marker = "/dir/";
-  const index = url.indexOf(marker);
+  const titleMatch = text.match(
+    /([A-Z]{1,3}\s+[^\n>]{2,80})\s*>\s*([A-Z]{1,3}\s+[^\n]{2,80})/
+  );
 
-  if (index === -1) {
-    throw new Error("Это не маршрут Google Maps");
-  }
+  const priceMatch = text.match(
+    /(?:Price|Preis|Prix|Cena|Frachtpreis)?\s*([0-9][0-9 .,'-]{1,12})\s*(EUR|€)/i
+  );
 
-  let routePart = url.substring(index + marker.length);
+  const weightMatch = text.match(
+    /(?:Weight|Gewicht|Poids|Waga)[^\d]{0,20}([0-9]+(?:[.,][0-9]+)?)\s*(t|to|tons?|kg)/i
+  );
 
-  const atIndex = routePart.indexOf("/@");
-  if (atIndex !== -1) {
-    routePart = routePart.substring(0, atIndex);
-  }
+  const lengthMatch = text.match(
+    /(?:Length|Länge|Longueur|Długość)[^\d]{0,20}([0-9]+(?:[.,][0-9]+)?)\s*(m|meter|metres)/i
+  );
 
-  routePart = routePart.split("?")[0];
+  const dateMatch = text.match(
+    /(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)/
+  );
 
-  const parts = routePart
-    .split("/")
-    .map(cleanPlace)
-    .filter(Boolean)
-    .filter(p => !p.startsWith("data="))
-    .filter(p => !p.includes("!"))
-    .filter(p => !p.match(/^@[0-9.,]+/));
-
-  if (parts.length < 3) {
-    throw new Error("Нужно 3 точки: машина → загрузка → выгрузка");
-  }
-
-  return parts.slice(0, 3);
-}
-
-document.getElementById("readGoogleMaps").addEventListener("click", async () => {
-  const resultBox = document.getElementById("result");
-
-  try {
-    const [tab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true
-    });
-
-    const points = parseGoogleMapsUrl(tab.url);
-
-    document.getElementById("truck").value = points[0] || "";
-    document.getElementById("loading").value = points[1] || "";
-    document.getElementById("unloading").value = points[2] || "";
-
-    resultBox.innerText =
-      "Взял из Google Maps:\n" +
-      points.map((p, i) => `${i + 1}. ${p}`).join("\n");
-
-  } catch (e) {
-    resultBox.innerText = e.message;
-  }
-});
-function formatCountries(kmByCountry) {
-  let text = "";
-
-  for (const [country, km] of Object.entries(kmByCountry)) {
-    text += `${country}: ${km} км\n`;
-  }
-
-  return text.trim();
-}
-document.getElementById("calc").addEventListener("click", async () => {
-  const resultBox = document.getElementById("result");
-
-  const payload = {
-    truck_location: document.getElementById("truck").value,
-    loading: document.getElementById("loading").value,
-    unloading: document.getElementById("unloading").value,
-    price: Number(document.getElementById("price").value),
-    consumption: 15.5
+  return {
+    source: "timocom",
+    loading: titleMatch ? titleMatch[1].trim() : "",
+    unloading: titleMatch ? titleMatch[2].trim() : "",
+    price: priceMatch ? priceMatch[1].trim().replace(",", ".") : "",
+    currency: priceMatch ? "EUR" : "",
+    cargoWeight: weightMatch ? weightMatch[1].replace(",", ".") : "",
+    cargoLength: lengthMatch ? lengthMatch[1].replace(",", ".") : "",
+    date: dateMatch ? dateMatch[1] : "",
+    fullText: text
   };
+}
 
-  resultBox.innerText = "Считаю...";
+function setValueIfExists(id, value) {
+  const el = document.getElementById(id);
+  if (el && value) {
+    el.value = value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+}
+
+async function getActiveTimocomTab() {
+  const tabs = await chrome.tabs.query({
+    active: true,
+    currentWindow: true
+  });
+
+  return tabs.find(tab => tab.url && tab.url.includes("timocom.com"));
+}
+
+async function captureFromTimocomTabIfPossible() {
+  const tab = await getActiveTimocomTab();
+
+  if (!tab?.id) return null;
 
   try {
-    const response = await fetch("http://localhost:8000/calculate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: "CAPTURE_TIMOCOM_OFFER"
     });
 
-    const data = await response.json();
+    if (response?.ok) return response.offer;
+  } catch (err) {
+    console.warn("[dispatcher-assistant] Cannot message TIMOCOM tab:", err);
+  }
 
-    if (data.error) {
-      resultBox.innerText = data.error;
-      return;
+  return null;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("takeTimocomOfferBtn");
+  const debugTextarea = document.getElementById("timocomDebugText");
+
+  if (!btn) return;
+
+  btn.addEventListener("click", async () => {
+    btn.textContent = "Читаю TIMOCOM...";
+    btn.disabled = true;
+
+    try {
+      let offer = await captureFromTimocomTabIfPossible();
+
+      if (!offer) {
+        const stored = await chrome.storage.local.get([
+          "timocomSelectedOffer",
+          "timocomSelectedOfferText"
+        ]);
+
+        offer = stored.timocomSelectedOffer || {
+          fullText: stored.timocomSelectedOfferText || ""
+        };
+      }
+
+      const parsed = parseTimocomOffer(offer);
+
+      if (debugTextarea) {
+        debugTextarea.value = parsed.fullText || "";
+      }
+
+      setValueIfExists("truck_location", parsed.loading);
+      setValueIfExists("loading", parsed.loading);
+      setValueIfExists("unloading", parsed.unloading);
+      setValueIfExists("price", parsed.price);
+
+      await chrome.storage.local.set({
+        timocomParsedOffer: parsed
+      });
+
+      btn.textContent = "✅ Груз взят";
+    } catch (err) {
+      console.error("[dispatcher-assistant] TIMOCOM take failed:", err);
+      btn.textContent = "❌ Ошибка TIMOCOM";
     }
 
-    const decision =
-      data.net_rate >= 0.45 ? "🟢 GOOD" :
-      data.net_rate >= 0.30 ? "🟡 OK" :
-      "🔴 BAD";
-
-    resultBox.innerText =
-      `${decision}\n\n` +
-      `Всего: ${data.total_km} км\n` +
-      `Время: ${data.duration_h} ч\n\n` +
-      `По странам:\n${formatCountryDetails(data.country_details)}\n\n` +
-      `Топливо: ${data.fuel_cost} €\n` +
-      `Платки: ${data.tolls} €\n` +
-      `Расходы: ${data.total_cost} €\n` +
-      `Маржа: ${data.margin} €\n` +
-      `Рейт: ${data.rate} €/км\n` +
-      `Чистый: ${data.net_rate} €/км`;
-
-  } catch (e) {
-    resultBox.innerText = "Ошибка API. Проверь, запущен ли uvicorn.";
-  }
+    setTimeout(() => {
+      btn.textContent = "Взять выбранный груз TIMOCOM";
+      btn.disabled = false;
+    }, 1500);
+  });
+});
 });

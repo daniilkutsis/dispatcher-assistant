@@ -6,12 +6,15 @@
   "permissions": [
     "activeTab",
     "tabs",
-    "sidePanel"
+    "sidePanel",
+    "storage"
   ],
 
   "host_permissions": [
     "http://localhost:8000/*",
-    "https://www.google.com/maps/*"
+    "https://www.google.com/maps/*",
+    "https://*.timocom.com/*",
+    "https://*.timocom.pl/*"
   ],
 
   "background": {
@@ -24,5 +27,16 @@
 
   "side_panel": {
     "default_path": "popup.html"
-  }
+  },
+
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.timocom.com/*",
+        "https://*.timocom.pl/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
 }
