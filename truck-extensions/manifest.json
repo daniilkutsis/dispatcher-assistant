@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Truck Route Calculator",
+  "version": "1.0",
+
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "sidePanel"
+  ],
+
+  "host_permissions": [
+    "http://localhost:8000/*",
+    "https://www.google.com/maps/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "action": {
+    "default_title": "Open Truck Panel"
+  },
+
+  "side_panel": {
+    "default_path": "popup.html"
+  }
+}

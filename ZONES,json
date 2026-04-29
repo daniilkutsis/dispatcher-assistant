@@ -1,0 +1,44 @@
+[
+  {
+    "name": "Ruhr / Düsseldorf / Köln",
+    "rating": "GOOD",
+    "countries": ["DE"],
+    "postal_prefixes": ["40", "41", "42", "44", "45", "46", "47", "50", "51"],
+    "comment": "сильная зона: Рур, Дюссельдорф, Кёльн"
+  },
+  {
+    "name": "DE4-DE5 general",
+    "rating": "GOOD",
+    "countries": ["DE"],
+    "postal_prefixes": ["4", "5"],
+    "comment": "в целом хорошая немецкая зона"
+  },
+  {
+    "name": "Benelux",
+    "rating": "GOOD",
+    "countries": ["BE", "NL", "LU"],
+    "postal_prefixes": [],
+    "comment": "ликвидная зона, удобно искать следующий груз"
+  },
+  {
+    "name": "South France",
+    "rating": "BAD",
+    "countries": ["FR"],
+    "postal_prefixes": ["06", "11", "13", "31", "34", "40", "64", "65", "66", "83"],
+    "comment": "юг Франции, риск слабой обратки"
+  },
+  {
+    "name": "Spain / Portugal",
+    "rating": "BAD",
+    "countries": ["ES", "PT"],
+    "postal_prefixes": [],
+    "comment": "рискованное направление без заранее найденной обратки"
+  },
+  {
+    "name": "DE8 South Germany",
+    "rating": "OK",
+    "countries": ["DE"],
+    "postal_prefixes": ["8"],
+    "comment": "средняя зона, следующий груз лучше искать заранее"
+  }
+]

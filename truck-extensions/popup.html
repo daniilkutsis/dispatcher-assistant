@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 340px;
+      font-family: Arial, sans-serif;
+      padding: 12px;
+    }
+
+    input, button {
+      width: 100%;
+      margin-bottom: 8px;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+
+    button {
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .small {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+
+    .result {
+      margin-top: 10px;
+      font-size: 14px;
+      white-space: pre-line;
+    }
+  </style>
+</head>
+<body>
+  <h3>Truck route</h3>
+
+  <button id="readGoogleMaps">Взять из Google Maps</button>
+
+  <div class="small">
+    Открой Google Maps route: машина → загрузка → выгрузка
+  </div>
+
+  <input id="truck" placeholder="Где машина">
+  <input id="loading" placeholder="Загрузка">
+  <input id="unloading" placeholder="Выгрузка">
+  <input id="price" type="number" placeholder="Ставка €">
+
+  <button id="calc">Рассчитать truck route</button>
+
+  <div id="result" class="result"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
