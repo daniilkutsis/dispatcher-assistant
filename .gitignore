@@ -10,4 +10,4 @@ __pycache__/
 
 # system
 .DS_Store
-Thumbs.db
+Thumbs.db__pycache__/
