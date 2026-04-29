@@ -20,20 +20,38 @@ TRUCK_RESTRICTIONS = {
     "weight": 7.2
 }
 
-COUNTRY_MAP = {
-    "17": "BEL",
-    "70": "NLD",
-    "74": "DEU",
-    "200": "FRA",
-    "276": "DEU",
-    "250": "FRA",
-    "528": "NLD",
-    "56": "BEL",
-    "616": "POL"
+COUNTRY_ID_MAP = {
+    40: "AT",
+    56: "BE",
+    203: "CZ",
+    276: "DE",
+    208: "DK",
+    724: "ES",
+    250: "FR",
+    826: "GB",
+    348: "HU",
+    380: "IT",
+    528: "NL",
+    616: "PL",
+    620: "PT",
+    642: "RO",
+    703: "SK",
+    705: "SI",
+    752: "SE",
 }
 
 app = FastAPI()
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "chrome-extension://jeladjgafdnfiooadkfefibeadenmilk",
+        "http://localhost",
+        "http://127.0.0.1",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
