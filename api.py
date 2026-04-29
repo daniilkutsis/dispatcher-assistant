@@ -2,278 +2,333 @@ import os
 import json
 import re
 import requests
+from math import radians, cos, sin, asin, sqrt
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+load_dotenv()
+ORS_API_KEY = os.getenv("ORS_API_KEY", "YOUR_ORS_KEY")
+print("ORS key loaded:", ORS_API_KEY[:8], "...")
+RATES_PATH = Path("country_rates.json")
 
-ORS_API_KEY = os.getenv("ORS_API_KEY")
-RATES_FILE = Path(__file__).parent / "country_rates.json"
+app = FastAPI()
 
-TRUCK_RESTRICTIONS = {
-    "height": 3.0,
-    "width": 2.55,
-    "length": 7.5,
-    "weight": 7.2
-}
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class RouteRequest(BaseModel):
+    truck_location: str = ""
+    loading: str
+    unloading: str
+    price: float = 0
+
 
 COUNTRY_ID_MAP = {
+    # ISO numeric fallback
     40: "AT",
     56: "BE",
+    100: "BG",
+    191: "HR",
     203: "CZ",
-    276: "DE",
     208: "DK",
-    724: "ES",
+    233: "EE",
+    246: "FI",
     250: "FR",
-    826: "GB",
+    276: "DE",
+    300: "GR",
     348: "HU",
+    372: "IE",
     380: "IT",
+    428: "LV",
+    440: "LT",
+    442: "LU",
     528: "NL",
     616: "PL",
     620: "PT",
     642: "RO",
     703: "SK",
     705: "SI",
+    724: "ES",
     752: "SE",
+    756: "CH",
+    826: "GB",
+
+    # ORS countryinfo internal IDs seen in responses
+    187: "ES",
+    70: "FR",
+    97: "IT",
+    180: "SI",
+    88: "HU",
 }
-
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "chrome-extension://jeladjgafdnfiooadkfefibeadenmilk",
-        "http://localhost",
-        "http://127.0.0.1",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-class CalcRequest(BaseModel):
-    truck_location: str
-    loading: str
-    unloading: str
-    price: float
-    consumption: float = 15.0
 
 
 def load_rates():
-    with open(RATES_FILE, "r", encoding="utf-8") as f:
+    if not RATES_PATH.exists():
+        return {}
+
+    with open(RATES_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def parse_coords(place: str):
-    if not place:
-        return None
+def clean_place(place: str):
+    place = (place or "").strip()
 
-    pattern = r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$"
-    match = re.match(pattern, place.strip())
+    match = re.match(r"^([A-Z]{2})[,\s]+(.+)$", place)
+    if match:
+        return match.group(2).strip(), match.group(1).strip()
 
-    if not match:
-        return None
+    return place, None
 
-    lat = float(match.group(1))
-    lon = float(match.group(2))
-
-    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-        return None
-
-    return [lon, lat]
-def normalize_place(place: str):
-    replacements = {
-        "Бельгия": "Belgium",
-        "Германия": "Germany",
-        "Франция": "France",
-        "Нидерланды": "Netherlands",
-        "Голландия": "Netherlands",
-        "Польша": "Poland",
-        "Чехия": "Czech Republic",
-        "Австрия": "Austria",
-        "Италия": "Italy",
-        "Испания": "Spain",
-        "Литва": "Lithuania",
-        "Латвия": "Latvia",
-        "Эстония": "Estonia"
-    }
-
-    for ru, en in replacements.items():
-        place = place.replace(ru, en)
-
-    return place
 
 def geocode(place: str):
-    place = normalize_place(place)
-    coords = parse_coords(place)
-
-    if coords:
-        print("PARSED COORDS:", place, "=>", coords)
-        return coords
-
-    url = "https://api.openrouteservice.org/geocode/search"
+    query, country_code = clean_place(place)
 
     params = {
         "api_key": ORS_API_KEY,
-        "text": place,
+        "text": query,
         "size": 1,
-        "boundary.rect.min_lon": -11,
-        "boundary.rect.min_lat": 35,
-        "boundary.rect.max_lon": 35,
-        "boundary.rect.max_lat": 72,
     }
 
-    r = requests.get(url, params=params, timeout=30)
-    r.raise_for_status()
-    data = r.json()
+    if country_code:
+        params["boundary.country"] = country_code
 
-    if not data["features"]:
-        raise ValueError(f"Не нашёл координаты в Европе: {place}")
+    response = requests.get(
+        "https://api.openrouteservice.org/geocode/search",
+        params=params,
+        timeout=30,
+    )
 
-    coords = data["features"][0]["geometry"]["coordinates"]
-    label = data["features"][0]["properties"].get("label")
+    data = response.json()
 
-    print("GEOCODE:", place, "=>", label, coords)
+    if not response.ok:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": f"ORS geocode HTTP error for {place}",
+                "ors_response": data,
+            },
+        )
+
+    if not data.get("features"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": f"Geocode failed for {place}",
+                "query": query,
+                "country": country_code,
+                "ors_response": data,
+            },
+        )
+
+    feature = data["features"][0]
+    coords = feature["geometry"]["coordinates"]
+    label = feature.get("properties", {}).get("label", "")
+
+    print(f"GEOCODE: {place} => {label} {coords}")
 
     return coords
 
 
-def truck_route(coords):
-    print("ROUTE COORDS:", coords)
+def haversine(coord1, coord2):
+    lon1, lat1 = coord1
+    lon2, lat2 = coord2
 
-    url = "https://api.openrouteservice.org/v2/directions/driving-hgv"
+    radius_km = 6371
+
+    dlon = radians(lon2 - lon1)
+    dlat = radians(lat2 - lat1)
+
+    a = (
+        sin(dlat / 2) ** 2
+        + cos(radians(lat1))
+        * cos(radians(lat2))
+        * sin(dlon / 2) ** 2
+    )
+
+    c = 2 * asin(sqrt(a))
+
+    return radius_km * c
+
+
+def country_km_from_route(route):
+    total_km = route["summary"]["distance"] / 1000
+
+    extras = route.get("extras", {})
+    countryinfo = extras.get("countryinfo", {})
+    values = countryinfo.get("values", [])
+
+    if not values:
+        return {"UNK": total_km}
+
+    country_counts = {}
+
+    for segment in values:
+        start_idx, end_idx, country_id = segment
+        country_code = COUNTRY_ID_MAP.get(country_id, f"UNK_{country_id}")
+        if country_code.startswith("UNK_"):
+            print("UNKNOWN COUNTRY ID:", country_id)
+        points_count = max(1, end_idx - start_idx)
+
+        country_counts[country_code] = country_counts.get(country_code, 0) + points_count
+
+    total_points = sum(country_counts.values())
+
+    if total_points <= 0:
+        return {"UNK": total_km}
+
+    return {
+        country: total_km * count / total_points
+        for country, count in country_counts.items()
+    }
+
+
+def build_route_coordinates(req: RouteRequest):
+    coords = []
+
+    places = [
+        req.truck_location,
+        req.loading,
+        req.unloading,
+    ]
+
+    for place in places:
+        place = (place or "").strip()
+
+        if not place:
+            continue
+
+        coords.append(geocode(place))
+
+    deduped = []
+
+    for coord in coords:
+        if not deduped or coord != deduped[-1]:
+            deduped.append(coord)
+
+    if len(deduped) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Need at least loading and unloading coordinates",
+                "received": {
+                    "truck_location": req.truck_location,
+                    "loading": req.loading,
+                    "unloading": req.unloading,
+                },
+            },
+        )
+
+    print("ROUTE COORDS:", deduped)
+
+    return deduped
+
+
+@app.post("/calculate")
+def calculate(req: RouteRequest):
+    rates = load_rates()
+
+    coordinates = build_route_coordinates(req)
 
     body = {
-        "coordinates": coords,
+        "coordinates": coordinates,
+        "radiuses": [25000] * len(coordinates),
+        "geometry": True,
         "extra_info": ["countryinfo"],
-        "radiuses": [10000] * len(coords),
         "options": {
+            "vehicle_type": "hgv",
             "profile_params": {
-                "restrictions": TRUCK_RESTRICTIONS
-            }
-        }
+                "restrictions": {
+                    "height": 3.0,
+                    "width": 2.55,
+                    "length": 7.5,
+                    "weight": 7.2,
+                }
+            },
+        },
     }
 
     headers = {
         "Authorization": ORS_API_KEY,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
-    r = requests.post(url, json=body, headers=headers, timeout=60)
+    response = requests.post(
+        "https://api.openrouteservice.org/v2/directions/driving-hgv",
+        json=body,
+        headers=headers,
+        timeout=60,
+    )
 
-    if not r.ok:
-        print("ORS ERROR:", r.status_code, r.text)
-        return {
-            "error": "ORS не нашёл грузовую дорогу рядом с одной из точек. Проверь точки или выбери ближайший город/дорогу.",
-            "details": r.text
-        }
+    data = response.json()
 
-    return r.json()
+    if not response.ok:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "ORS route failed",
+                "ors_response": data,
+            },
+        )
 
+    route = data["routes"][0]
 
-def country_km_from_route(route):
-    summary = route["routes"][0]["summary"]
-    total_km = summary["distance"] / 1000
-
-    extras = route["routes"][0].get("extras", {})
-
-    if "countryinfo" not in extras:
-        return {}
-
-    values = extras["countryinfo"]["values"]
-    total_points = values[-1][1]
-
-    result = {}
-
-    for start, end, country in values:
-        ratio = (end - start) / total_points
-        km = total_km * ratio
-
-        country_id = str(int(country))
-        country_code = COUNTRY_MAP.get(country_id, f"UNK_{country_id}")
-
-        result[country_code] = result.get(country_code, 0) + km
-
-    return {k: round(v, 1) for k, v in result.items()}
-
-
-@app.post("/calculate")
-def calculate(req: CalcRequest):
-    if not ORS_API_KEY:
-        return {"error": "Нет ORS_API_KEY"}
-
-    rates = load_rates()
-
-    truck = geocode(req.truck_location)
-    loading = geocode(req.loading)
-    unloading = geocode(req.unloading)
-
-    route = truck_route([truck, loading, unloading])
-
-    if "error" in route:
-        return route
-
-    summary = route["routes"][0]["summary"]
-
-    total_km = round(summary["distance"] / 1000, 1)
-    duration_h = round(summary["duration"] / 3600, 2)
+    total_km = route["summary"]["distance"] / 1000
+    duration_h = route["summary"]["duration"] / 3600
 
     km_by_country = country_km_from_route(route)
 
-    fuel_liters = total_km * req.consumption / 100
+    fuel_per_100km = 15
+    fuel_price = 1.65
 
-    tolls = 0
-    fuel_cost = 0
+    fuel_liters = total_km * fuel_per_100km / 100
+    fuel_cost = fuel_liters * fuel_price
+
     country_details = {}
+    total_toll = 0
 
     for country, km in km_by_country.items():
         country_rate = rates.get(country, {})
-        diesel = country_rate.get("diesel", 1.65)
+        toll_per_km = country_rate.get("toll_per_km", 0)
 
-        country_fuel = km * req.consumption / 100 * diesel
+        toll = km * toll_per_km
+        fuel_part = (km / total_km) * fuel_cost if total_km else 0
+        country_total = fuel_part + toll
 
-        if country_rate.get("mode") == "lsva":
-            weight = country_rate.get("weight", 7.2)
-            rate_per_tkm = country_rate.get("rate_per_tkm", 0.028)
-            country_toll = km * weight * rate_per_tkm
-        else:
-            toll_per_km = country_rate.get("toll_per_km", 0)
-            country_toll = km * toll_per_km
-
-        fuel_cost += country_fuel
-        tolls += country_toll
+        total_toll += toll
 
         country_details[country] = {
             "km": round(km, 1),
-            "fuel": round(country_fuel, 2),
-            "toll": round(country_toll, 2),
-            "total": round(country_fuel + country_toll, 2)
+            "fuel": round(fuel_part, 1),
+            "toll": round(toll, 1),
+            "total": round(country_total, 1),
         }
-        
-    total_cost = fuel_cost + tolls
-    margin = req.price - total_cost
 
+    total_cost = fuel_cost + total_toll
+    margin = req.price - total_cost
     rate = req.price / total_km if total_km else 0
     net_rate = margin / total_km if total_km else 0
+
     return {
-        "total_km": total_km,
-        "duration_h": duration_h,
-        "km_by_country": km_by_country,
+        "total_km": round(total_km, 1),
+        "duration_h": round(duration_h, 2),
+        "km_by_country": {
+            country: round(km, 1) for country, km in km_by_country.items()
+        },
         "country_details": country_details,
         "fuel_liters": round(fuel_liters, 1),
-        "fuel_cost": round(fuel_cost, 2),
-        "tolls": round(tolls, 2),
-        "total_cost": round(total_cost, 2),
-        "margin": round(margin, 2),
+        "fuel_cost": round(fuel_cost, 1),
+        "tolls": round(total_toll, 1),
+        "total_cost": round(total_cost, 1),
+        "margin": round(margin, 1),
         "rate": round(rate, 2),
-        "net_rate": round(net_rate, 2)
+        "net_rate": round(net_rate, 2),
     }

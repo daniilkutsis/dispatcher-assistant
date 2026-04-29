@@ -117,7 +117,7 @@ async function calculateRoute() {
   };
 
   if (resultEl) resultEl.innerHTML = "Calculating...";
-
+    console.log("[dispatcher-assistant] calculate payload:", payload);
   try {
     const response = await fetch("http://127.0.0.1:8000/calculate", {
       method: "POST",
@@ -130,7 +130,11 @@ async function calculateRoute() {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.detail || JSON.stringify(data));
+      throw new Error(
+         typeof data.detail === "string"
+          ? data.detail
+         : JSON.stringify(data.detail || data, null, 2)
+      );
     }
 
     if (resultEl) {
