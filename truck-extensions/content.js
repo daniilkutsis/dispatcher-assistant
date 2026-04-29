@@ -24,7 +24,7 @@
       '[class*="Drawer"]',
       '[class*="panel"]',
       '[class*="Panel"]',
-      'aside',
+      "aside",
       '[role="dialog"]'
     ];
 
@@ -42,16 +42,28 @@
           text.length > 100
         ) {
           if (!best || text.length > best.text.length) {
-            best = { el, text, selector };
+            best = {
+              el,
+              text,
+              selector
+            };
           }
         }
       });
     }
 
     if (best) {
-      console.log("[dispatcher-assistant] TIMOCOM panel matched:", best.selector);
+      console.log(
+        "[dispatcher-assistant] TIMOCOM panel matched:",
+        best.selector
+      );
+
       return best.text;
     }
+
+    console.warn(
+      "[dispatcher-assistant] TIMOCOM detail panel not found, using body text"
+    );
 
     return normalizeText(document.body.innerText);
   }
@@ -69,39 +81,72 @@
 
     return {
       source: "timocom",
-      title: titleMatch ? `${titleMatch[1].trim()} > ${titleMatch[2].trim()}` : "",
+      title: titleMatch
+        ? `${titleMatch[1].trim()} > ${titleMatch[2].trim()}`
+        : "",
       loading: titleMatch ? titleMatch[1].trim() : "",
       unloading: titleMatch ? titleMatch[2].trim() : "",
-      price: priceMatch ? `${priceMatch[1].trim()} ${priceMatch[2].trim()}` : "",
+      price: priceMatch
+        ? `${priceMatch[1].trim()} ${priceMatch[2].trim()}`
+        : "",
       fullText: clean,
       capturedAt: new Date().toISOString(),
       url: location.href
     };
   }
 
+  async function saveToChromeStorage(offer, text) {
+    try {
+      if (!chrome?.storage?.local) {
+        console.warn("[dispatcher-assistant] chrome.storage.local unavailable");
+        return;
+      }
+
+      await chrome.storage.local.set({
+        timocomSelectedOfferText: text,
+        timocomSelectedOffer: offer
+      });
+    } catch (err) {
+      console.warn("[dispatcher-assistant] chrome.storage failed:", err);
+    }
+  }
+
+  function sendRuntimeMessage(offer) {
+    try {
+      if (!chrome?.runtime?.sendMessage) {
+        console.warn("[dispatcher-assistant] chrome.runtime unavailable");
+        return;
+      }
+
+      chrome.runtime.sendMessage({
+        type: "TIMOCOM_OFFER_CAPTURED",
+        payload: offer
+      });
+    } catch (err) {
+      console.warn("[dispatcher-assistant] chrome.runtime.sendMessage failed:", err);
+    }
+  }
+
   async function captureTimocomOffer() {
     const text = getRightPanelText();
     const offer = parseQuickTimocomText(text);
 
-    await chrome.storage.local.set({
-      timocomSelectedOfferText: text,
-      timocomSelectedOffer: offer
-    });
+    await saveToChromeStorage(offer, text);
 
     console.log("[dispatcher-assistant] TIMOCOM offer saved:", offer);
 
-    chrome.runtime.sendMessage({
-      type: "TIMOCOM_OFFER_CAPTURED",
-      payload: offer
-    });
+    sendRuntimeMessage(offer);
 
     return offer;
   }
 
   function injectAnalyzeButton() {
-    if (document.getElementById("dispatcher-analyze-timocom-btn")) return;
+    if (document.getElementById("dispatcher-analyze-timocom-btn")) {
+      return;
+    }
 
     const btn = document.createElement("button");
+
     btn.id = "dispatcher-analyze-timocom-btn";
     btn.textContent = "🚚 Analyze open offer";
 
@@ -129,7 +174,7 @@
         await captureTimocomOffer();
         btn.textContent = "✅ Offer saved";
       } catch (err) {
-        console.error("[dispatcher-assistant] TIMOCOM capture failed", err);
+        console.error("[dispatcher-assistant] TIMOCOM capture failed:", err);
         btn.textContent = "❌ Capture failed";
       }
 
@@ -142,24 +187,52 @@
     document.body.appendChild(btn);
   }
 
-  injectAnalyzeButton();
-
-  const observer = new MutationObserver(() => {
+  function startObserver() {
     injectAnalyzeButton();
-  });
 
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
+    const observer = new MutationObserver(() => {
+      injectAnalyzeButton();
+    });
 
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg?.type === "CAPTURE_TIMOCOM_OFFER") {
-      captureTimocomOffer()
-        .then((offer) => sendResponse({ ok: true, offer }))
-        .catch((error) => sendResponse({ ok: false, error: String(error) }));
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
 
-      return true;
+  function attachRuntimeListener() {
+    try {
+      if (!chrome?.runtime?.onMessage) {
+        console.warn("[dispatcher-assistant] chrome.runtime.onMessage unavailable");
+        return;
+      }
+
+      chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+        if (msg?.type === "CAPTURE_TIMOCOM_OFFER") {
+          captureTimocomOffer()
+            .then((offer) => {
+              sendResponse({
+                ok: true,
+                offer
+              });
+            })
+            .catch((error) => {
+              sendResponse({
+                ok: false,
+                error: String(error)
+              });
+            });
+
+          return true;
+        }
+
+        return false;
+      });
+    } catch (err) {
+      console.warn("[dispatcher-assistant] Cannot attach runtime listener:", err);
     }
-  });
+  }
+
+  startObserver();
+  attachRuntimeListener();
 })();
