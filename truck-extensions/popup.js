@@ -11,16 +11,23 @@ function parseTimocomOffer(input) {
     typeof input === "string" ? input : input?.fullText || ""
   );
 
-  const routeMatch = text.match(
-    /([A-Z]{2},?\s*[0-9A-Z -]*\s*[A-Za-zÀ-ž .'-]+)\s+.*?\n([A-Z]{2},?\s*[0-9A-Z -]*\s*[A-Za-zÀ-ž .'-]+)/s
-  );
+  if (
+    text.includes("Search filter") &&
+    text.includes("Country selection") &&
+    !text.includes("Loading and unloading places")
+  ) {
+    return emptyTimocomOffer(text);
+  }
 
   const titleMatch = text.match(
     /([A-Z]{2}\s+[A-Za-zÀ-ž .'-]+)\s*>\s*([A-Z]{2}\s+[A-Za-zÀ-ž .'-]+)/
   );
 
-  const priceMatch = text.match(/Price\s*\n?\s*([0-9][0-9 .,'-]*)\s*EUR/i);
+  const routeMatch = text.match(
+    /Loading and unloading places\s+([A-Z]{2},?\s*[0-9A-Z -]*\s*[A-Za-zÀ-ž .'-]+).*?\n([A-Z]{2},?\s*[0-9A-Z -]*\s*[A-Za-zÀ-ž .'-]+)/s
+  );
 
+  const priceMatch = text.match(/Price\s*\n?\s*([0-9][0-9 .,'-]*)\s*EUR/i);
   const lengthMatch = text.match(/([0-9]+(?:[.,][0-9]+)?)\s*m\b/i);
   const weightMatch = text.match(/([0-9]+(?:[.,][0-9]+)?)\s*t\b/i);
 
@@ -46,11 +53,9 @@ function parseTimocomOffer(input) {
     cargoWeight: weightMatch ? weightMatch[1].replace(",", ".") : "",
     fullText: text
   };
-  if (
-  text.includes("Search filter") &&
-  text.includes("Country selection") &&
-  !text.includes("Loading and unloading places")
-) {
+}
+
+function emptyTimocomOffer(text) {
   return {
     source: "timocom",
     loading: "",
@@ -60,9 +65,8 @@ function parseTimocomOffer(input) {
     currency: "",
     cargoLength: "",
     cargoWeight: "",
-    fullText: text
+    fullText: text || ""
   };
-}
 }
 
 function setValueIfExists(id, value) {
@@ -94,9 +98,7 @@ async function captureFromTimocomTabIfPossible() {
       type: "CAPTURE_TIMOCOM_OFFER"
     });
 
-    if (response?.ok) {
-      return response.offer;
-    }
+    if (response?.ok) return response.offer;
   } catch (err) {
     console.warn("[dispatcher-assistant] Cannot message TIMOCOM tab:", err);
   }
@@ -104,12 +106,53 @@ async function captureFromTimocomTabIfPossible() {
   return null;
 }
 
+async function calculateRoute() {
+  const resultEl = document.getElementById("result");
+
+  const payload = {
+    truck_location: document.getElementById("truck_location")?.value || "",
+    loading: document.getElementById("loading")?.value || "",
+    unloading: document.getElementById("unloading")?.value || "",
+    price: Number(document.getElementById("price")?.value || 0)
+  };
+
+  if (resultEl) resultEl.innerHTML = "Calculating...";
+
+  try {
+    const response = await fetch("http://127.0.0.1:8000/calculate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || JSON.stringify(data));
+    }
+
+    if (resultEl) {
+      resultEl.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+    }
+
+    console.log("[dispatcher-assistant] route result:", data);
+  } catch (err) {
+    console.error("[dispatcher-assistant] calculate failed:", err);
+
+    if (resultEl) {
+      resultEl.innerHTML = `Error: ${err.message}`;
+    }
+  }
+}
+
 async function handleTakeTimocomOffer() {
   const btn = document.getElementById("takeTimocomOfferBtn");
   const debugTextarea = document.getElementById("timocomDebugText");
 
   if (btn) {
-    btn.textContent = "Читаю TIMOCOM...";
+    btn.textContent = "Reading TIMOCOM...";
     btn.disabled = true;
   }
 
@@ -137,46 +180,27 @@ async function handleTakeTimocomOffer() {
     setValueIfExists("loading", parsed.loading);
     setValueIfExists("unloading", parsed.unloading);
     setValueIfExists("price", parsed.price);
-    const analyzeBtn =
-    document.getElementById("calculateBtn") ||
-    document.getElementById("analyzeBtn") ||
-    document.getElementById("routeBtn") ||
-    document.querySelector("[data-action='calculate-route']");
-
-    if (analyzeBtn) {
-     analyzeBtn.click();
-      } else {
-      console.warn("[dispatcher-assistant] analyze/calculate button not found");
-    }
 
     await chrome.storage.local.set({
       timocomParsedOffer: parsed
     });
 
+    await calculateRoute();
+
     if (btn) {
-      btn.textContent = "✅ Груз взят";
+      btn.textContent = "✅ Offer taken";
     }
   } catch (err) {
     console.error("[dispatcher-assistant] TIMOCOM take failed:", err);
 
     if (btn) {
-      btn.textContent = "❌ Ошибка TIMOCOM";
+      btn.textContent = "❌ TIMOCOM error";
     }
   }
-  document.addEventListener("DOMContentLoaded", () => {
-  const calculateBtn = document.getElementById("calculateBtn");
-
-  if (calculateBtn) {
-    calculateBtn.addEventListener("click", () => {
-      console.log("[dispatcher-assistant] Analyze route clicked");
-      alert("Analyze route clicked");
-    });
-  }
-});
 
   setTimeout(() => {
     if (btn) {
-      btn.textContent = "Взять выбранный груз TIMOCOM";
+      btn.textContent = "Take selected TIMOCOM offer";
       btn.disabled = false;
     }
   }, 1500);
@@ -184,10 +208,13 @@ async function handleTakeTimocomOffer() {
 
 document.addEventListener("DOMContentLoaded", () => {
   const takeTimocomOfferBtn = document.getElementById("takeTimocomOfferBtn");
+  const calculateBtn = document.getElementById("calculateBtn");
 
   if (takeTimocomOfferBtn) {
     takeTimocomOfferBtn.addEventListener("click", handleTakeTimocomOffer);
-  } else {
-    console.warn("[dispatcher-assistant] takeTimocomOfferBtn not found");
+  }
+
+  if (calculateBtn) {
+    calculateBtn.addEventListener("click", calculateRoute);
   }
 });
