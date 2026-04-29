@@ -1,7 +1,5 @@
 (function () {
-  const isTimocom = location.hostname.includes("timocom.com");
-
-  if (!isTimocom) return;
+  if (!location.hostname.includes("timocom.com")) return;
 
   console.log("[dispatcher-assistant] TIMOCOM content.js loaded");
 
@@ -14,64 +12,89 @@
   }
 
   function getRightPanelText() {
-  // ключевая секция в TIMOCOM
-  const panel = document.querySelector('[class*="Loading"]')?.closest('div');
+    const elements = Array.from(
+      document.querySelectorAll("div, section, article, aside")
+    );
 
-  if (panel) {
-    console.log("[dispatcher] found panel via Loading section");
-    return normalizeText(panel.innerText);
-  }
+    const candidates = elements
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const text = normalizeText(el.innerText);
 
-  // fallback — ищем по заголовку маршрута
-  const header = Array.from(document.querySelectorAll("div"))
-    .find(el => el.innerText?.includes("Loading and unloading places"));
+        let score = 0;
 
-  if (header) {
-    const container = header.closest("div");
-    if (container) {
-      console.log("[dispatcher] found panel via header");
-      return normalizeText(container.innerText);
+        if (text.includes("Loading and unloading places")) score += 50;
+        if (text.includes("Freight description")) score += 30;
+        if (text.includes("Vehicle requirements")) score += 30;
+        if (text.includes("Freight charge")) score += 30;
+        if (text.includes("Price")) score += 10;
+
+        if (text.includes("Search filter")) score -= 100;
+        if (text.includes("Country selection")) score -= 100;
+        if (text.includes("New offers only")) score -= 50;
+
+        return {
+          el,
+          rect,
+          text,
+          score
+        };
+      })
+      .filter((item) => {
+        return (
+          item.score > 50 &&
+          item.text.length > 150 &&
+          item.rect.width > 300 &&
+          item.rect.height > 250
+        );
+      })
+      .sort((a, b) => b.score - a.score);
+
+    if (candidates.length) {
+      console.log("[dispatcher-assistant] TIMOCOM detail candidate:", {
+        score: candidates[0].score,
+        rect: {
+          left: candidates[0].rect.left,
+          top: candidates[0].rect.top,
+          width: candidates[0].rect.width,
+          height: candidates[0].rect.height
+        },
+        preview: candidates[0].text.slice(0, 500)
+      });
+
+      return candidates[0].text;
     }
-  }
 
-  console.warn("[dispatcher] fallback to body (bad)");
-  return normalizeText(document.body.innerText);
-}
+    console.warn("[dispatcher-assistant] TIMOCOM detail panel not found");
+    return "";
+  }
 
   function parseQuickTimocomText(text) {
     const clean = normalizeText(text);
 
     const titleMatch = clean.match(
-      /([A-Z]{1,3}\s+[^\n>]{2,80})\s*>\s*([A-Z]{1,3}\s+[^\n]{2,80})/
+      /([A-Z]{2}\s+[A-Za-zÀ-ž .'-]+)\s*>\s*([A-Z]{2}\s+[A-Za-zÀ-ž .'-]+)/
     );
 
-    const priceMatch = clean.match(
-      /(?:Price|Preis|Prix|Cena|Frachtpreis)?\s*([0-9][0-9 .,'-]{1,12})\s*(EUR|€)/i
-    );
+    const priceMatch = clean.match(/Price\s*\n?\s*([0-9][0-9 .,'-]*)\s*EUR/i);
 
     return {
       source: "timocom",
-      title: titleMatch
-        ? `${titleMatch[1].trim()} > ${titleMatch[2].trim()}`
-        : "",
+      title: titleMatch ? `${titleMatch[1].trim()} > ${titleMatch[2].trim()}` : "",
       loading: titleMatch ? titleMatch[1].trim() : "",
       unloading: titleMatch ? titleMatch[2].trim() : "",
-      price: priceMatch
-        ? `${priceMatch[1].trim()} ${priceMatch[2].trim()}`
-        : "",
+      price: priceMatch ? priceMatch[1].trim() : "",
       fullText: clean,
       capturedAt: new Date().toISOString(),
       url: location.href
     };
   }
 
-  async function saveToChromeStorage(offer, text) {
-    try {
-      if (!chrome?.storage?.local) {
-        console.warn("[dispatcher-assistant] chrome.storage.local unavailable");
-        return;
-      }
+  async function captureTimocomOffer() {
+    const text = getRightPanelText();
+    const offer = parseQuickTimocomText(text);
 
+    try {
       await chrome.storage.local.set({
         timocomSelectedOfferText: text,
         timocomSelectedOffer: offer
@@ -79,15 +102,8 @@
     } catch (err) {
       console.warn("[dispatcher-assistant] chrome.storage failed:", err);
     }
-  }
 
-  function sendRuntimeMessage(offer) {
     try {
-      if (!chrome?.runtime?.sendMessage) {
-        console.warn("[dispatcher-assistant] chrome.runtime unavailable");
-        return;
-      }
-
       chrome.runtime.sendMessage({
         type: "TIMOCOM_OFFER_CAPTURED",
         payload: offer
@@ -95,28 +111,15 @@
     } catch (err) {
       console.warn("[dispatcher-assistant] chrome.runtime.sendMessage failed:", err);
     }
-  }
 
-  async function captureTimocomOffer() {
-    const text = getRightPanelText();
-    const offer = parseQuickTimocomText(text);
-
-    await saveToChromeStorage(offer, text);
-
-    console.log("[dispatcher-assistant] TIMOCOM offer saved:", offer);
-
-    sendRuntimeMessage(offer);
-
+    console.log("[dispatcher-assistant] TIMOCOM offer captured:", offer);
     return offer;
   }
 
   function injectAnalyzeButton() {
-    if (document.getElementById("dispatcher-analyze-timocom-btn")) {
-      return;
-    }
+    if (document.getElementById("dispatcher-analyze-timocom-btn")) return;
 
     const btn = document.createElement("button");
-
     btn.id = "dispatcher-analyze-timocom-btn";
     btn.textContent = "🚚 Analyze open offer";
 
@@ -141,8 +144,13 @@
       btn.disabled = true;
 
       try {
-        await captureTimocomOffer();
-        btn.textContent = "✅ Offer saved";
+        const offer = await captureTimocomOffer();
+
+        if (!offer.fullText) {
+          btn.textContent = "❌ Panel not found";
+        } else {
+          btn.textContent = "✅ Offer saved";
+        }
       } catch (err) {
         console.error("[dispatcher-assistant] TIMOCOM capture failed:", err);
         btn.textContent = "❌ Capture failed";
@@ -157,41 +165,13 @@
     document.body.appendChild(btn);
   }
 
-  function startObserver() {
-    injectAnalyzeButton();
-
-    const observer = new MutationObserver(() => {
-      injectAnalyzeButton();
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-  }
-
   function attachRuntimeListener() {
     try {
-      if (!chrome?.runtime?.onMessage) {
-        console.warn("[dispatcher-assistant] chrome.runtime.onMessage unavailable");
-        return;
-      }
-
       chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (msg?.type === "CAPTURE_TIMOCOM_OFFER") {
           captureTimocomOffer()
-            .then((offer) => {
-              sendResponse({
-                ok: true,
-                offer
-              });
-            })
-            .catch((error) => {
-              sendResponse({
-                ok: false,
-                error: String(error)
-              });
-            });
+            .then((offer) => sendResponse({ ok: true, offer }))
+            .catch((error) => sendResponse({ ok: false, error: String(error) }));
 
           return true;
         }
@@ -199,10 +179,20 @@
         return false;
       });
     } catch (err) {
-      console.warn("[dispatcher-assistant] Cannot attach runtime listener:", err);
+      console.warn("[dispatcher-assistant] runtime listener failed:", err);
     }
   }
 
-  startObserver();
+  injectAnalyzeButton();
+
+  const observer = new MutationObserver(() => {
+    injectAnalyzeButton();
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
   attachRuntimeListener();
 })();
