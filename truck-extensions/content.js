@@ -14,59 +14,29 @@
   }
 
   function getRightPanelText() {
-    const candidates = [
-      '[data-testid*="detail"]',
-      '[class*="detail"]',
-      '[class*="Detail"]',
-      '[class*="side"]',
-      '[class*="Side"]',
-      '[class*="drawer"]',
-      '[class*="Drawer"]',
-      '[class*="panel"]',
-      '[class*="Panel"]',
-      "aside",
-      '[role="dialog"]'
-    ];
+  // ключевая секция в TIMOCOM
+  const panel = document.querySelector('[class*="Loading"]')?.closest('div');
 
-    let best = null;
-
-    for (const selector of candidates) {
-      document.querySelectorAll(selector).forEach((el) => {
-        const rect = el.getBoundingClientRect();
-        const text = normalizeText(el.innerText);
-
-        if (
-          rect.width > 250 &&
-          rect.height > 300 &&
-          rect.left > window.innerWidth * 0.35 &&
-          text.length > 100
-        ) {
-          if (!best || text.length > best.text.length) {
-            best = {
-              el,
-              text,
-              selector
-            };
-          }
-        }
-      });
-    }
-
-    if (best) {
-      console.log(
-        "[dispatcher-assistant] TIMOCOM panel matched:",
-        best.selector
-      );
-
-      return best.text;
-    }
-
-    console.warn(
-      "[dispatcher-assistant] TIMOCOM detail panel not found, using body text"
-    );
-
-    return normalizeText(document.body.innerText);
+  if (panel) {
+    console.log("[dispatcher] found panel via Loading section");
+    return normalizeText(panel.innerText);
   }
+
+  // fallback — ищем по заголовку маршрута
+  const header = Array.from(document.querySelectorAll("div"))
+    .find(el => el.innerText?.includes("Loading and unloading places"));
+
+  if (header) {
+    const container = header.closest("div");
+    if (container) {
+      console.log("[dispatcher] found panel via header");
+      return normalizeText(container.innerText);
+    }
+  }
+
+  console.warn("[dispatcher] fallback to body (bad)");
+  return normalizeText(document.body.innerText);
+}
 
   function parseQuickTimocomText(text) {
     const clean = normalizeText(text);
