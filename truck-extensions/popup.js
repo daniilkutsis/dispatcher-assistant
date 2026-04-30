@@ -240,6 +240,58 @@ async function captureFromTimocomTabIfPossible() {
 
   return null;
 }
+async function handleScanVisibleOffers() {
+  const btn = document.getElementById("scanVisibleOffersBtn");
+  const resultsBox = document.getElementById("scanResults");
+
+  if (btn) {
+    btn.textContent = "Scanning...";
+    btn.disabled = true;
+  }
+
+  try {
+    const tab = await getActiveTimocomTab();
+    if (!tab?.id) throw new Error("TIMOCOM tab not found");
+
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: "SCAN_VISIBLE_TIMOCOM_OFFERS"
+    });
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "Scan failed");
+    }
+
+    const offers = response.offers || [];
+
+    if (resultsBox) {
+      resultsBox.textContent = JSON.stringify(offers, null, 2);
+    }
+
+    await chrome.storage.local.set({
+      timocomScannedOffers: offers
+    });
+
+    if (btn) btn.textContent = `✅ Scanned ${offers.length}`;
+  } catch (err) {
+    console.error("[dispatcher-assistant] scan failed:", err);
+    if (resultsBox) resultsBox.textContent = String(err);
+    if (btn) btn.textContent = "❌ Scan failed";
+  }
+
+  setTimeout(() => {
+    if (btn) {
+      btn.textContent = "Scan visible offers";
+      btn.disabled = false;
+    }
+  }, 1500);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const scanBtn = document.getElementById("scanVisibleOffersBtn");
+  if (scanBtn) {
+    scanBtn.addEventListener("click", handleScanVisibleOffers);
+  }
+});
 
 function buildPayloadFromForm() {
   return {

@@ -30,13 +30,13 @@
   },
 
   "content_scripts": [
-    {
-      "matches": [
-        "https://*.timocom.com/*",
-        "https://*.timocom.pl/*"
-      ],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ]
+  {
+    "matches": [
+      "https://my.timocom.com/*",
+      "https://*.timocom.com/*"
+    ],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }
+]
 }
