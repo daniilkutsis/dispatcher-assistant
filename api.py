@@ -33,6 +33,8 @@ class RouteRequest(BaseModel):
 
 COUNTRY_ID_MAP = {
     # ISO numeric
+    11: "NLD",
+    162: "ROU",
     40: "AUT",
     56: "BEL",
     100: "BGR",

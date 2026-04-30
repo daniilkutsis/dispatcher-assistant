@@ -48,15 +48,54 @@ function getTimocomOfferText() {
 
 function captureTimocomOffer() {
   const fullText = getTimocomOfferText();
+  const truckLocation = getTruckLocationFromFilter();
 
   return {
     source: "timocom",
     fullText,
+    truckLocation,
     capturedAt: new Date().toISOString(),
     url: window.location.href,
   };
 }
+function getTruckLocationFromFilter() {
+  // ищем именно chips фильтра
+  const chips = Array.from(
+    document.querySelectorAll('[class*="chip"], [class*="tag"], [class*="Token"]')
+  );
 
+  for (const chip of chips) {
+    const text = normalizeTimocomText(chip.innerText || "");
+
+    // пример: "2950 Kapellen (Putte)"
+    const match = text.match(
+      /(\d{4,6})\s+([A-Za-zÀ-ž .'\-()]+)/
+    );
+
+    if (!match) continue;
+
+    const zip = match[1];
+    const city = match[2]  
+    .replace(/\(.*?\)/g, "")
+    .replace(/[()]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+    // теперь найдём страну рядом (слева от chip)
+    const container = chip.closest("div");
+    const containerText = normalizeTimocomText(container?.innerText || "");
+
+    const countryMatch = containerText.match(/\b([A-Z]{2})\b/);
+
+    const country = countryMatch ? countryMatch[1] : "";
+
+    if (!country || !zip || !city) continue;
+
+    return `${country}, ${zip} ${city}`;
+  }
+
+  return "";
+}
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== "CAPTURE_TIMOCOM_OFFER") return;
 

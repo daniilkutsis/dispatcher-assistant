@@ -19,20 +19,18 @@ function emptyTimocomOffer(text = "") {
     cargoLength: "",
     cargoWeight: "",
     dates: [],
-    fullText: text || "",
+    fullText: text,
   };
 }
 
 function parseNumber(value) {
   if (!value) return "";
 
-  const cleaned = String(value)
+  return String(value)
     .replace(/\s/g, "")
     .replace(/\./g, "")
     .replace(",", ".")
     .replace(/[^\d.]/g, "");
-
-  return cleaned || "";
 }
 
 function parseTimocomOffer(input) {
@@ -40,78 +38,65 @@ function parseTimocomOffer(input) {
     typeof input === "string" ? input : input?.fullText || ""
   );
 
-  if (!text) return emptyTimocomOffer("");
+   if (!text) return emptyTimocomOffer("");
 
-  const looksLikeFilter =
-    text.includes("Search filter") &&
-    text.includes("Country selection") &&
-    !text.includes("Loading and unloading places");
+   const isFilterText =
+     text.includes("Search filter") &&
+     text.includes("Country selection") &&
+     !text.includes("Loading and unloading places");
 
-  if (looksLikeFilter) {
-    return emptyTimocomOffer(text);
-  }
+   if (isFilterText) return emptyTimocomOffer(text);
 
-  const lines = text
-    .split("\n")
-    .map((x) => x.trim())
-    .filter(Boolean);
+   const priceMatch =
+     text.match(/Price\s*\n?\s*([0-9][0-9 .,'-]*)\s*(EUR|€)/i) ||
+     text.match(/([0-9][0-9 .,'-]*)\s*(EUR|€)/i);
 
-  const titleMatch = text.match(
-    /([A-Z]{2}\s+[A-Za-zÀ-ž0-9 .,'’`-]+)\s*>\s*([A-Z]{2}\s+[A-Za-zÀ-ž0-9 .,'’`-]+)/
-  );
+   const lengthMatch = text.match(/([0-9]+(?:[.,][0-9]+)?)\s*m\b/i);
+   const weightMatch = text.match(/([0-9]+(?:[.,][0-9]+)?)\s*t\b/i);
 
-  const routeBlockMatch = text.match(
-  /Loading and unloading places\s+([\s\S]*?)(?:Contact details|Freight description|Vehicle requirements|Freight charge|$)/i
-);
+   const dates = [
+     ...text.matchAll(/\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b/g),
+   ].map((m) => m[0]);
 
-if (routeBlockMatch) {
-  const routeLines = routeBlockMatch[1]
-    .split("\n")
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .filter((line) =>
-      /^[A-Z]{2}[,\s]/.test(line) &&
-      !/^\d+\s*km$/i.test(line) &&
-      !/^\d{1,2}\/\d{1,2}/.test(line) &&
-      !/^\d{1,2}:\d{2}/.test(line)
-    );
+   const routeBlockMatch = text.match(
+     /Loading and unloading places\s+([\s\S]*?)(?:Contact details|Freight description|Vehicle requirements|Freight charge|$)/i
+   );
 
-  if (routeLines.length >= 2) {
-    loading = routeLines[0];
-    unloading = routeLines[1];
-  }
-}
+   let loading = "";
+   let unloading = "";
 
-  if (!loading || !unloading) {
-    const locationLines = lines.filter((line) => {
-      return (
-        /^[A-Z]{2}[,\s]/.test(line) &&
-        /[A-Za-zÀ-ž]/.test(line) &&
-        !/Search filter|Country selection|Radius/i.test(line)
-      );
-    });
+   if (routeBlockMatch) {
+     const rawLines = routeBlockMatch[1]
+       .split("\n")
+       .map((x) => x.trim())
+       .filter(Boolean);
 
-    if (locationLines.length >= 2) {
-      loading = locationLines[0];
-      unloading = locationLines[1];
+     const addresses = [];
+
+     for (let i = 0; i < rawLines.length; i++) {
+       const line = rawLines[i];
+
+       if (!/^[A-Z]{2}$/.test(line)) continue;
+
+       const next = rawLines[i + 1] || "";
+
+       if (/^,\s*\d{2,6}\s+.+/.test(next)) {
+        addresses.push(`${line}${next}`);
+         i++;
+      }
+    }
+
+    if (addresses.length >= 2) {
+      loading = addresses[0];
+      unloading = addresses[1];
     }
   }
-
-  const priceMatch =
-    text.match(/Price\s*\n?\s*([0-9][0-9 .,'-]*)\s*(EUR|€)/i) ||
-    text.match(/([0-9][0-9 .,'-]*)\s*(EUR|€)/i);
-
-  const lengthMatch = text.match(/([0-9]+(?:[.,][0-9]+)?)\s*m\b/i);
-  const weightMatch = text.match(/([0-9]+(?:[.,][0-9]+)?)\s*t\b/i);
-
-  const dates = [...text.matchAll(/\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b/g)]
-    .map((m) => m[0]);
 
   return {
     source: "timocom",
     loading,
     unloading,
-    truck_location: loading,
+    truck_location: input?.truckLocation || loading,
     price: priceMatch ? parseNumber(priceMatch[1]) : "",
     currency: priceMatch ? "EUR" : "",
     cargoLength: lengthMatch ? parseNumber(lengthMatch[1]) : "",
@@ -119,24 +104,6 @@ if (routeBlockMatch) {
     dates,
     fullText: text,
   };
-}
-
-function setValueIfExists(id, value) {
-  const el = document.getElementById(id);
-  if (!el || value === undefined || value === null || value === "") return;
-
-  el.value = value;
-  el.dispatchEvent(new Event("input", { bubbles: true }));
-  el.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
-function setResult(message) {
-  const resultEl = document.getElementById("result");
-  if (resultEl) resultEl.innerHTML = message || "";
-}
-
-function renderError(message) {
-  setResult(`<div class="error">❌ ${escapeHtml(message)}</div>`);
 }
 
 function escapeHtml(value) {
@@ -148,22 +115,54 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function renderRouteResult(data) {
+function setValueIfExists(id, value) {
+  const el = document.getElementById(id);
+  if (!el || value === undefined || value === null || value === "") return;
+
+  el.value = value;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function setResult(html) {
+  const el = document.getElementById("result");
+  if (el) el.innerHTML = html || "";
+}
+
+function renderError(message) {
   const loading = document.getElementById("loading")?.value || "";
   const unloading = document.getElementById("unloading")?.value || "";
+  const mapsUrl = buildGoogleMapsUrl(loading, unloading);
 
-  const mapsUrl =
+  setResult(`
+    <div class="error">❌ ${escapeHtml(message)}</div>
+    ${mapsUrl ? `<a class="maps-link" href="${mapsUrl}" target="_blank">🗺️ Open route in Google Maps</a>` : ""}
+  `);
+}
+
+function buildGoogleMapsUrl(loading, unloading) {
+  if (!loading || !unloading) return "";
+
+  return (
     "https://www.google.com/maps/dir/?api=1" +
     `&origin=${encodeURIComponent(loading)}` +
     `&destination=${encodeURIComponent(unloading)}` +
-    "&travelmode=driving";
-  const decision = data.decision || "MAYBE";
+    "&travelmode=driving"
+  );
+}
 
-  const decisionClass = {
-    TAKE: "decision-take",
-    MAYBE: "decision-maybe",
-    SKIP: "decision-skip",
-  }[decision] || "decision-maybe";
+function renderRouteResult(data) {
+  const loading = document.getElementById("loading")?.value || "";
+  const unloading = document.getElementById("unloading")?.value || "";
+  const mapsUrl = buildGoogleMapsUrl(loading, unloading);
+
+  const decision = data.decision || "MAYBE";
+  const decisionClass =
+    {
+      TAKE: "decision-take",
+      MAYBE: "decision-maybe",
+      SKIP: "decision-skip",
+    }[decision] || "decision-maybe";
 
   const countryRows = Object.entries(data.country_details || {})
     .map(([country, item]) => {
@@ -181,6 +180,8 @@ function renderRouteResult(data) {
 
   setResult(`
     <div class="decision ${decisionClass}">${escapeHtml(decision)}</div>
+
+    ${mapsUrl ? `<a class="maps-link" href="${mapsUrl}" target="_blank">🗺️ Open route in Google Maps</a>` : ""}
 
     <div class="result-grid">
       <div>Route</div><b>${data.total_km} km</b>
@@ -203,9 +204,7 @@ function renderRouteResult(data) {
           <th>Total</th>
         </tr>
       </thead>
-      <tbody>
-        ${countryRows}
-      </tbody>
+      <tbody>${countryRows}</tbody>
     </table>
 
     <details>
@@ -236,7 +235,7 @@ async function captureFromTimocomTabIfPossible() {
     if (response?.ok) return response.offer;
     if (response?.error) throw new Error(response.error);
   } catch (err) {
-    console.warn("[dispatcher-assistant] Cannot message TIMOCOM tab:", err);
+    console.debug("[dispatcher-assistant] Cannot message TIMOCOM tab:", err);
   }
 
   return null;
@@ -244,7 +243,10 @@ async function captureFromTimocomTabIfPossible() {
 
 function buildPayloadFromForm() {
   return {
-    truck_location: document.getElementById("truck_location")?.value || "",
+    truck_location:
+      document.getElementById("truck_location")?.value === "truck_location"
+      ? ""
+      : document.getElementById("truck_location")?.value || "",
     loading: document.getElementById("loading")?.value || "",
     unloading: document.getElementById("unloading")?.value || "",
     price: Number(document.getElementById("price")?.value || 0),
@@ -266,8 +268,6 @@ async function calculateRoute() {
 
   const calculateBtn = document.getElementById("calculateBtn");
   if (calculateBtn) calculateBtn.disabled = true;
-
-  console.log("[dispatcher-assistant] calculate payload:", payload);
 
   try {
     const response = await fetch("http://127.0.0.1:8000/calculate", {
@@ -293,9 +293,7 @@ async function calculateRoute() {
     }
 
     renderRouteResult(data);
-    console.log("[dispatcher-assistant] route result:", data);
   } catch (err) {
-    console.error("[dispatcher-assistant] calculate failed:", err);
     renderError(err.message || String(err));
   } finally {
     isCalculating = false;
@@ -328,8 +326,6 @@ async function handleTakeTimocomOffer() {
 
     const parsed = parseTimocomOffer(offer);
 
-    console.log("[dispatcher-assistant] parsed TIMOCOM offer:", parsed);
-
     if (debugTextarea) {
       debugTextarea.value = parsed.fullText || "";
     }
@@ -351,16 +347,10 @@ async function handleTakeTimocomOffer() {
 
     await calculateRoute();
 
-    if (btn) {
-      btn.textContent = "✅ Offer taken";
-    }
+    if (btn) btn.textContent = "✅ Offer taken";
   } catch (err) {
-    console.error("[dispatcher-assistant] TIMOCOM take failed:", err);
     renderError(err.message || String(err));
-
-    if (btn) {
-      btn.textContent = "❌ TIMOCOM error";
-    }
+    if (btn) btn.textContent = "❌ TIMOCOM error";
   } finally {
     setTimeout(() => {
       if (btn) {
